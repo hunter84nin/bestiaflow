@@ -3,7 +3,6 @@ FROM python:3.13.5-slim
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE="1"
 ENV PYTHONUNBUFFERED="1"
-ENV PORT="8888"
 
 # Set work directory
 WORKDIR /mediaflow_proxy
