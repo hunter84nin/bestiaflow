@@ -104,11 +104,12 @@ class MPDSegmentParams(GenericParams):
     mime_type: str = Field(..., description="The MIME type of the segment.")
     key_id: Optional[str] = Field(None, description="The DRM key ID (optional).")
     key: Optional[str] = Field(None, description="The DRM key (optional).")
+    is_live: Optional[bool] = Field(None, alias="is_live", description="Whether the parent MPD is live.")
 
 
 class ExtractorURLParams(GenericParams):
     host: Literal[
-        "Doodstream", "FileLions", "FileMoon", "Mixdrop", "Uqload", "Streamtape", "Supervideo", "VixCloud", "Okru", "Maxstream", "LiveTV", "LuluStream", "DLHD", "Fastream", "Voe", "Sportsonline"
+        "Doodstream", "FileLions", "FileMoon", "Mixdrop", "Uqload", "Streamtape", "Supervideo", "VixCloud", "Okru", "Maxstream", "LiveTV", "LuluStream", "DLHD", "Fastream", "Vidmoly", "Voe", "Sportsonline"
     ] = Field(..., description="The host to extract the URL from.")
     destination: str = Field(..., description="The URL of the stream.", alias="d")
     redirect_stream: bool = Field(False, description="Whether to redirect to the stream endpoint automatically.")
