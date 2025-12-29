@@ -6,6 +6,7 @@ from mediaflow_proxy.extractors.doodstream import DoodStreamExtractor
 from mediaflow_proxy.extractors.sportsonline import SportsonlineExtractor
 from mediaflow_proxy.extractors.filelions import FileLionsExtractor
 from mediaflow_proxy.extractors.filemoon import FileMoonExtractor
+from mediaflow_proxy.extractors.F16Px import F16PxExtractor
 from mediaflow_proxy.extractors.livetv import LiveTVExtractor
 from mediaflow_proxy.extractors.lulustream import LuluStreamExtractor
 from mediaflow_proxy.extractors.maxstream import MaxstreamExtractor
@@ -17,6 +18,7 @@ from mediaflow_proxy.extractors.supervideo import SupervideoExtractor
 from mediaflow_proxy.extractors.turbovidplay import TurboVidPlayExtractor
 from mediaflow_proxy.extractors.uqload import UqloadExtractor
 from mediaflow_proxy.extractors.vavoo import VavooExtractor
+from mediaflow_proxy.extractors.vidguard import VidGuardExtractor
 from mediaflow_proxy.extractors.vidmoly import VidmolyExtractor
 from mediaflow_proxy.extractors.vidoza import VidozaExtractor
 from mediaflow_proxy.extractors.vixcloud import VixCloudExtractor
@@ -31,6 +33,7 @@ class ExtractorFactory:
         "Doodstream": DoodStreamExtractor,
         "FileLions": FileLionsExtractor,
         "FileMoon": FileMoonExtractor,
+        "F16Px": F16PxExtractor,
         "Uqload": UqloadExtractor,
         "Mixdrop": MixdropExtractor,
         "Streamtape": StreamtapeExtractor,
@@ -44,6 +47,7 @@ class ExtractorFactory:
         "LuluStream": LuluStreamExtractor,
         "DLHD": DLHDExtractor,
         "Vavoo": VavooExtractor,
+        "VidGuard": VidGuardExtractor,
         "Vidmoly": VidmolyExtractor,
         "Vidoza": VidozaExtractor,
         "Fastream": FastreamExtractor,

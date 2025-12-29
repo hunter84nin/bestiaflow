@@ -230,6 +230,14 @@ class Streamer:
                 raise DownloadError(502, f"Protocol error while streaming: {e}")
         except GeneratorExit:
             logger.info("Streaming session stopped by the user")
+        except httpx.ReadError as e:
+            # Handle network read errors gracefully - these occur when upstream connection drops
+            logger.warning(f"ReadError while streaming: {e}")
+            if self.bytes_transferred > 0:
+                logger.info(f"Partial content received ({self.bytes_transferred} bytes) before ReadError. Graceful termination.")
+                return
+            else:
+                raise DownloadError(502, f"ReadError while streaming: {e}")
         except Exception as e:
             logger.error(f"Error streaming content: {e}")
             raise
@@ -587,20 +595,13 @@ class EnhancedStreamingResponse(Response):
             logger.error(f"Error in listen_for_disconnect: {str(e)}")
 
     async def stream_response(self, send: Send) -> None:
+        # Track if response headers have been sent to prevent duplicate headers
+        response_started = False
+        # Track if response finalization (more_body: False) has been sent to prevent ASGI protocol violation
+        finalization_sent = False
         try:
             # Initialize headers
             headers = list(self.raw_headers)
-
-            # Set the transfer-encoding to chunked for streamed responses with content-length
-            # when content-length is present. This ensures we don't hit protocol errors
-            # if the upstream connection is closed prematurely.
-            for i, (name, _) in enumerate(headers):
-                if name.lower() == b"content-length":
-                    # Replace content-length with transfer-encoding: chunked for streaming
-                    headers[i] = (b"transfer-encoding", b"chunked")
-                    headers = [h for h in headers if h[0].lower() != b"content-length"]
-                    logger.debug("Switched from content-length to chunked transfer-encoding for streaming")
-                    break
 
             # Start the response
             await send(
@@ -610,6 +611,7 @@ class EnhancedStreamingResponse(Response):
                     "headers": headers,
                 }
             )
+            response_started = True
 
             # Track if we've sent any data
             data_sent = False
@@ -628,27 +630,29 @@ class EnhancedStreamingResponse(Response):
 
                 # Successfully streamed all content
                 await send({"type": "http.response.body", "body": b"", "more_body": False})
-            except (httpx.RemoteProtocolError, h11._util.LocalProtocolError) as e:
-                # Handle connection closed errors
+                finalization_sent = True
+            except (httpx.RemoteProtocolError, httpx.ReadError, h11._util.LocalProtocolError) as e:
+                # Handle connection closed / read errors gracefully
                 if data_sent:
                     # We've sent some data to the client, so try to complete the response
-                    logger.warning(f"Remote protocol error after partial streaming: {e}")
+                    logger.warning(f"Upstream connection error after partial streaming: {e}")
                     try:
                         await send({"type": "http.response.body", "body": b"", "more_body": False})
+                        finalization_sent = True
                         logger.info(
                             f"Response finalized after partial content ({self.actual_content_length} bytes transferred)"
                         )
                     except Exception as close_err:
-                        logger.warning(f"Could not finalize response after remote error: {close_err}")
+                        logger.warning(f"Could not finalize response after upstream error: {close_err}")
                 else:
                     # No data was sent, re-raise the error
-                    logger.error(f"Protocol error before any data was streamed: {e}")
+                    logger.error(f"Upstream error before any data was streamed: {e}")
                     raise
         except Exception as e:
             logger.exception(f"Error in stream_response: {str(e)}")
-            if not isinstance(e, (ConnectionResetError, anyio.BrokenResourceError)):
+            if not isinstance(e, (ConnectionResetError, anyio.BrokenResourceError)) and not response_started:
+                # Only attempt to send error response if headers haven't been sent yet
                 try:
-                    # Try to send an error response if client is still connected
                     await send(
                         {
                             "type": "http.response.start",
@@ -658,36 +662,39 @@ class EnhancedStreamingResponse(Response):
                     )
                     error_message = f"Streaming error: {str(e)}".encode("utf-8")
                     await send({"type": "http.response.body", "body": error_message, "more_body": False})
+                    finalization_sent = True
                 except Exception:
                     # If we can't send an error response, just log it
+                    pass
+            elif response_started and not finalization_sent:
+                # Response already started but not finalized - gracefully close the stream
+                try:
+                    await send({"type": "http.response.body", "body": b"", "more_body": False})
+                    finalization_sent = True
+                except Exception:
                     pass
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         async with anyio.create_task_group() as task_group:
-            streaming_completed = False
             stream_func = partial(self.stream_response, send)
             listen_func = partial(self.listen_for_disconnect, receive)
 
             async def wrap(func: typing.Callable[[], typing.Awaitable[None]]) -> None:
                 try:
                     await func()
-                    # If this is the stream_response function and it completes successfully, mark as done
-                    if func == stream_func:
-                        nonlocal streaming_completed
-                        streaming_completed = True
                 except Exception as e:
-                    if isinstance(e, (httpx.RemoteProtocolError, h11._util.LocalProtocolError)):
-                        # Handle protocol errors more gracefully
-                        logger.warning(f"Protocol error during streaming: {e}")
-                    elif not isinstance(e, anyio.get_cancelled_exc_class()):
-                        logger.exception("Error in streaming task")
-                        # Only re-raise if it's not a protocol error or cancellation
+                    # Note: stream_response and listen_for_disconnect handle their own exceptions
+                    # internally. This is a safety net for any unexpected exceptions that might
+                    # escape due to future code changes.
+                    if not isinstance(e, anyio.get_cancelled_exc_class()):
+                        logger.exception(f"Unexpected error in streaming task: {type(e).__name__}: {e}")
+                        # Re-raise unexpected errors to surface bugs rather than silently swallowing them
                         raise
                 finally:
-                    # Only cancel the task group if we're in disconnect listener or
-                    # if streaming_completed is True (meaning we finished normally)
-                    if func == listen_func or streaming_completed:
-                        task_group.cancel_scope.cancel()
+                    # Cancel task group when either task completes or fails:
+                    # - stream_func finished (success or failure) -> stop listening for disconnect
+                    # - listen_func finished (client disconnected) -> stop streaming
+                    task_group.cancel_scope.cancel()
 
             # Start the streaming response in a separate task
             task_group.start_soon(wrap, stream_func)
